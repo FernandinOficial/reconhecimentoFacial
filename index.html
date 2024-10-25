@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reconhecimento Facial com JS</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        margin-top: 20px;
+      }
+      #video {
+        transform: rotate(90deg); /* Rotaciona o vídeo */
+        scale: 0.6;
+      }
+      #status {
+        font-size: 24px;
+        margin-top: 20px;
+        color: blue; /* Azul padrão */
+      }
+      #errorMessage {
+        color: red;
+        font-size: 24px;
+        display: none; /* Inicialmente oculto */
+      }
+      #executionTime {
+        font-size: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Reconhecimento Facial com face-api.js</h1>
+    <video id="video" width="720" height="560" autoplay muted></video>
+    <div id="status">Verificando...</div>
+    <div id="executionTime">Tempo de execução: 0s</div>
+    <div id="errorMessage">Esta não é a pessoa!</div>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+    <script>
+      let executionTime = 0; // Inicializa o tempo de execução
+      let recognized = false; // Variável para armazenar se a pessoa foi reconhecida
+      let timerId; // Variável para armazenar o ID do timer
+
+      async function startVideo() {
+        const video = document.getElementById("video");
+        const status = document.getElementById("status");
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          video.srcObject = stream;
+          status.textContent = "Câmera ativada!";
+          await loadModels(); // Carrega os modelos de reconhecimento facial
+        } catch (err) {
+          console.error("Erro ao acessar a webcam:", err);
+          status.textContent = "Erro ao ativar a câmera";
+          alert(
+            "Erro ao acessar a câmera. Verifique as permissões do navegador."
+          );
+        }
+      }
+
+      async function loadModels() {
+        const modelPaths = "models/"; // Caminho para os modelos
+        try {
+          // Tente carregar cada modelo e logue um sucesso individualmente
+          await faceapi.nets.tinyFaceDetector.loadFromUri(modelPaths);
+          console.log("Modelo Tiny Face Detector carregado com sucesso!");
+
+          await faceapi.nets.faceLandmark68Net.loadFromUri(modelPaths);
+          console.log("Modelo Face Landmark 68 Net carregado com sucesso!");
+
+          await faceapi.nets.faceRecognitionNet.loadFromUri(modelPaths);
+          console.log("Modelo Face Recognition Net carregado com sucesso!");
+
+          // Você pode também carregar o SSD MobileNet se necessário
+          await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPaths);
+          console.log("Modelo SSD MobileNet carregado com sucesso!");
+        } catch (error) {
+          console.error("Erro ao carregar modelos:", error);
+          document.getElementById("status").textContent =
+            "Erro ao carregar modelos!";
+          return;
+        }
+        document.getElementById("video").addEventListener("play", onPlay);
+      }
+
+      async function onPlay() {
+        const video = document.getElementById("video");
+        const displaySize = { width: video.width, height: video.height };
+        faceapi.matchDimensions(video, displaySize);
+
+        // Certifique-se de que a imagem de referência esteja disponível
+        try {
+          const referenceImage = await faceapi.fetchImage(
+            "img/fernandoRibeiro.jpg"
+          );
+          const labeledFaceDescriptors = await faceapi
+            .detectSingleFace(referenceImage)
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          if (!labeledFaceDescriptors) {
+            console.error(
+              "Não foi possível detectar a face da imagem de referência."
+            );
+            return;
+          }
+
+          // Inicia o timer
+          timerId = setInterval(() => {
+            executionTime++;
+            document.getElementById(
+              "executionTime"
+            ).textContent = `Tempo de execução: ${executionTime}s`;
+          }, 1000);
+
+          const intervalId = setInterval(async () => {
+            const detections = await faceapi
+              .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+              .withFaceLandmarks()
+              .withFaceDescriptors();
+
+            const resizedDetections = faceapi.resizeResults(
+              detections,
+              displaySize
+            );
+            const status = document.getElementById("status");
+
+            if (resizedDetections.length > 0) {
+              const faceMatcher = new faceapi.FaceMatcher(
+                [labeledFaceDescriptors],
+                0.6
+              );
+              const results = resizedDetections.map((d) =>
+                faceMatcher.findBestMatch(d.descriptor)
+              );
+
+              recognized = results.some(
+                (result) => result.label !== "desconhecido"
+              ); // Verifica se algum rosto foi reconhecido
+
+              results.forEach((result, i) => {
+                const box = resizedDetections[i].detection.box;
+                const drawBox = new faceapi.draw.DrawBox(box, {
+                  label: result.toString(),
+                });
+                drawBox.draw(video);
+              });
+
+              status.textContent = "Reconhecendo...";
+            } else {
+              status.textContent = "Verificando...";
+            }
+          }, 500);
+
+          setTimeout(() => {
+            clearInterval(intervalId);
+            clearInterval(timerId); // Para o timer de execução
+
+            const status = document.getElementById("status");
+            if (!recognized) {
+              document.getElementById("errorMessage").style.display = "block";
+              status.textContent = "Não reconhecido!";
+              status.style.color = "red"; // Vermelho para não reconhecido
+            } else {
+              status.textContent = "Reconhecido!";
+              status.style.color = "green"; // Verde se reconhecido
+            }
+          }, 3000);
+        } catch (error) {
+          console.error("Erro ao processar a imagem de referência:", error);
+          document.getElementById("status").textContent =
+            "Erro ao processar a imagem de referência!";
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", startVideo);
+    </script>
+  </body>
+</html>
